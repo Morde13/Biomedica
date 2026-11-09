@@ -1,0 +1,33 @@
+# Entornos Virtuales de Python
+.venv/
+env/
+
+# Caché de Python
+__pycache__/
+*.pyc
+
+# Dependencias de Node (Frontend)
+frontend/node_modules/
+
+# Archivos compilados del Frontend
+frontend/dist/
+
+# Archivos de entorno y secretos
+.env
+
+# Archivos subidos por los usuarios (Ignorar el contenido, excepto el LEEME)
+imagenes/*
+!imagenes/LEEME.txt
+
+calibraciones/*
+!calibraciones/LEEME.txt
+
+datasheets/*
+!datasheets/LEEME.txt
+
+mantenimientos/*
+!mantenimientos/LEEME.txt
+
+# Ignorar la imagen específica que tienes ahí de prueba
+20261108_103133_f30bc3_logo_volfia.jpg
+20261108_103143_c8cc93_WhatsApp_Image_2025-12-02_at_...

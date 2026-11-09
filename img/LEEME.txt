@@ -1,0 +1,2 @@
+Carpeta para iconos e identidad institucional (escudo / logo de la universidad).
+Puedes reemplazar "escudo_universidad.svg" (o subir un logo desde la interfaz / colocar "logo_universidad.png") para personalizar el escudo mostrado en la barra lateral.

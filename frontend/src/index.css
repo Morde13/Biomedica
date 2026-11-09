@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #F6F9F7;
+    color: #14281D;
+  }
+}
+
+/* Scrollbar sutil en tonos verdes y blancos */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F6F9F7;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #C6DECFE6;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #226B4D;
+}

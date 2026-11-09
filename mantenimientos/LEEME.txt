@@ -1,0 +1,1 @@
+Carpeta destinada a almacenar los reportes y evidencias de mantenimiento (PDF) asociados a la tabla Registro_Mantenimientos.

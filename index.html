@@ -1,0 +1,326 @@
+import React, { useState } from 'react';
+import { 
+  LayoutDashboard, 
+  Stethoscope, 
+  Wrench, 
+  CheckSquare, 
+  ClipboardList, 
+  User, 
+  LogOut, 
+  Menu,
+  FileText,
+  Edit,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  Download
+} from 'lucide-react';
+
+// --- Mock Data ---
+const mockEquipos = [
+  { id: 1, nombre: "Monitor de Signos Vitales Mindray ePM 10" },
+  { id: 2, nombre: "Desfibrilador Zoll M2" },
+  { id: 3, nombre: "Máquina de Anestesia Dräger Fabius Plus" },
+  { id: 4, nombre: "Bomba de Infusión Baxter" },
+];
+
+const mockCalibraciones = [
+  { id: 1, id_equipo: 1, equipo: "Monitor de Signos Vitales Mindray ePM 10", fecha: "2026-10-15", entidad: "Metrología Biomédica S.A.S", resultado: true },
+  { id: 2, id_equipo: 2, equipo: "Desfibrilador Zoll M2", fecha: "2026-11-01", entidad: "Calibración Segura Ltda.", resultado: false },
+  { id: 3, id_equipo: 3, equipo: "Máquina de Anestesia Dräger Fabius Plus", fecha: "2026-11-05", entidad: "Metrología Biomédica S.A.S", resultado: true },
+];
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('Calibraciones');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Navegación lateral
+  const navItems = [
+    { name: 'Dashboard', icon: <LayoutDashboard size={20} /> },
+    { name: 'Equipos', icon: <Stethoscope size={20} /> },
+    { name: 'Mantenimiento', icon: <Wrench size={20} /> },
+    { name: 'Calibraciones', icon: <CheckSquare size={20} /> },
+    { name: 'Préstamos', icon: <ClipboardList size={20} /> },
+  ];
+
+  return (
+    <div className="flex h-screen bg-gray-100 font-sans">
+      
+      {/* Sidebar */}
+      <div className={`bg-slate-800 text-white transition-all duration-300 flex flex-col ${isSidebarOpen ? 'w-64' : 'w-0 overflow-hidden md:w-20'}`}>
+        <div className="h-16 flex items-center justify-center border-b border-slate-700 px-4">
+          <h2 className={`font-bold text-lg whitespace-nowrap overflow-hidden transition-all ${isSidebarOpen ? 'opacity-100' : 'opacity-0 md:opacity-0 w-0'}`}>
+            Biolab Admin
+          </h2>
+        </div>
+        <nav className="flex-1 py-4">
+          <ul>
+            {navItems.map((item) => (
+              <li key={item.name} className="px-3 mb-1">
+                <button
+                  onClick={() => setActiveTab(item.name)}
+                  className={`w-full flex items-center p-3 rounded-lg transition-colors ${
+                    activeTab === item.name 
+                      ? 'bg-green-600 text-white' 
+                      : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                  }`}
+                >
+                  <span className="flex-shrink-0">{item.icon}</span>
+                  <span className={`ml-3 whitespace-nowrap overflow-hidden transition-all ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
+                    {item.name}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="p-4 border-t border-slate-700">
+           <button className="flex items-center text-slate-300 hover:text-white w-full p-2 rounded-lg hover:bg-slate-700 transition-colors">
+              <LogOut size={20} />
+              <span className={`ml-3 whitespace-nowrap overflow-hidden transition-all ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
+                Cerrar Sesión
+              </span>
+           </button>
+        </div>
+      </div>
+
+      {/* Main Content Wrapper */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        
+        {/* Header */}
+        <header className="bg-green-700 text-white h-16 flex items-center justify-between px-4 lg:px-8 shadow-md z-10 shrink-0">
+          <div className="flex items-center">
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 mr-4 rounded hover:bg-green-600 transition-colors focus:outline-none focus:ring-2 focus:ring-green-400"
+            >
+              <Menu size={24} />
+            </button>
+            <h1 className="text-xl font-semibold hidden sm:block truncate">Sistema de Gestión del Laboratorio</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <p className="text-sm font-medium">AdministradorLab</p>
+              <p className="text-xs text-green-200">Universidad Simón Bolívar</p>
+            </div>
+            <div className="bg-green-600 p-2 rounded-full border border-green-500">
+              <User size={20} />
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable Content Area */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+          {activeTab === 'Calibraciones' ? (
+            <div className="max-w-7xl mx-auto space-y-6">
+              
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <CheckSquare className="text-green-600" />
+                    Gestión de Calibraciones
+                  </h2>
+                  <p className="text-gray-500 text-sm mt-1">Registra y administra los certificados de calibración de los equipos médicos.</p>
+                </div>
+              </div>
+
+              {/* Sección 1: Formulario de Registro */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex items-center gap-2">
+                  <FileText size={18} className="text-gray-500" />
+                  <h3 className="font-semibold text-gray-700">Registrar Nueva Calibración</h3>
+                </div>
+                <div className="p-6">
+                  <form className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      
+                      {/* Equipo */}
+                      <div className="col-span-1 md:col-span-2 lg:col-span-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Seleccionar Equipo <span className="text-red-500">*</span>
+                        </label>
+                        <select className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-shadow text-sm">
+                          <option value="">-- Buscar equipo por nombre o serie --</option>
+                          {mockEquipos.map(eq => (
+                            <option key={eq.id} value={eq.id}>{eq.nombre}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Fecha de Calibración */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Fecha de Calibración <span className="text-red-500">*</span>
+                        </label>
+                        <input 
+                          type="date" 
+                          className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-shadow text-sm"
+                        />
+                      </div>
+
+                      {/* Entidad Calibradora */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Entidad Calibradora <span className="text-red-500">*</span>
+                        </label>
+                        <input 
+                          type="text" 
+                          placeholder="Ej: Metrología Biomédica S.A.S"
+                          className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-shadow text-sm"
+                        />
+                      </div>
+
+                      {/* Resultado Conforme */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Resultado de Calibración <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex gap-4">
+                          <label className="flex items-center cursor-pointer">
+                            <input type="radio" name="resultado" value="true" className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500" defaultChecked />
+                            <span className="ml-2 text-sm text-gray-700">Conforme</span>
+                          </label>
+                          <label className="flex items-center cursor-pointer">
+                            <input type="radio" name="resultado" value="false" className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500" />
+                            <span className="ml-2 text-sm text-gray-700">No Conforme</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Archivo Evidencia */}
+                      <div className="col-span-1 md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Evidencia (Certificado PDF)
+                        </label>
+                        <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-green-400 transition-colors bg-gray-50">
+                          <div className="space-y-1 text-center">
+                            <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            <div className="flex text-sm text-gray-600 justify-center">
+                              <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-green-600 hover:text-green-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-green-500">
+                                <span>Cargar un archivo</span>
+                                <input id="file-upload" name="file-upload" type="file" className="sr-only" accept=".pdf" />
+                              </label>
+                              <p className="pl-1">o arrastra y suelta</p>
+                            </div>
+                            <p className="text-xs text-gray-500">
+                              PDF hasta 10MB
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
+                    
+                    <div className="flex justify-end pt-4 border-t border-gray-100">
+                      <button 
+                        type="button" 
+                        className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg mr-3 hover:bg-gray-50 transition-colors text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-200"
+                      >
+                        Cancelar
+                      </button>
+                      <button 
+                        type="button" 
+                        className="bg-green-700 text-white px-6 py-2 rounded-lg hover:bg-green-800 transition-colors text-sm font-medium flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 shadow-sm"
+                      >
+                        <CheckSquare size={18} />
+                        Guardar Registro
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              {/* Sección 2: Tabla de Historial */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                  <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+                    <ClipboardList size={18} className="text-gray-500"/>
+                    Historial de Calibraciones
+                  </h3>
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      placeholder="Buscar en historial..." 
+                      className="text-sm px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 w-64"
+                    />
+                  </div>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm text-gray-600">
+                    <thead className="bg-gray-50 text-gray-700 text-xs uppercase font-semibold border-b border-gray-200">
+                      <tr>
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Equipo</th>
+                        <th className="px-6 py-4">Fecha</th>
+                        <th className="px-6 py-4">Entidad Calibradora</th>
+                        <th className="px-6 py-4">Resultado</th>
+                        <th className="px-6 py-4 text-center">Certificado</th>
+                        <th className="px-6 py-4 text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {mockCalibraciones.map((reg) => (
+                        <tr key={reg.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 font-medium text-gray-900">#{reg.id}</td>
+                          <td className="px-6 py-4 font-medium">{reg.equipo}</td>
+                          <td className="px-6 py-4">{reg.fecha}</td>
+                          <td className="px-6 py-4 text-gray-500">{reg.entidad}</td>
+                          <td className="px-6 py-4">
+                            {reg.resultado ? (
+                              <span className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                                <CheckCircle2 size={14} /> Conforme
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                                <XCircle size={14} /> No Conforme
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                            <button className="text-gray-400 hover:text-green-600 transition-colors" title="Descargar PDF">
+                              <Download size={18} className="mx-auto" />
+                            </button>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center justify-center gap-3">
+                              <button className="text-gray-400 hover:text-blue-600 transition-colors" title="Editar">
+                                <Edit size={16} />
+                              </button>
+                              <button className="text-gray-400 hover:text-red-600 transition-colors" title="Eliminar">
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center text-sm text-gray-500">
+                  <span>Mostrando 1 a 3 de 3 registros</span>
+                  <div className="flex gap-1">
+                    <button className="px-3 py-1 border border-gray-300 rounded bg-white text-gray-400 cursor-not-allowed">Anterior</button>
+                    <button className="px-3 py-1 border border-green-600 rounded bg-green-600 text-white">1</button>
+                    <button className="px-3 py-1 border border-gray-300 rounded bg-white text-gray-400 cursor-not-allowed">Siguiente</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center text-gray-400 space-y-4">
+                <Wrench size={48} className="mx-auto opacity-50" />
+                <h2 className="text-xl font-medium">Módulo de {activeTab}</h2>
+                <p>Esta sección está en construcción. Selecciona "Calibraciones" en el menú.</p>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+

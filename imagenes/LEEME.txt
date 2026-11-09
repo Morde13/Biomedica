@@ -1,0 +1,1 @@
+Carpeta destinada a almacenar las fotografías e imágenes de los equipos asociadas a la tabla Imagenes_Equipos.

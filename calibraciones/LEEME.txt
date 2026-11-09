@@ -1,0 +1,1 @@
+Carpeta destinada a almacenar los certificados de calibración (PDF) asociados a la tabla Registro_Calibraciones.

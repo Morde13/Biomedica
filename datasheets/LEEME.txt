@@ -1,0 +1,1 @@
+Carpeta destinada a almacenar los datasheets, manuales de usuario, guías rápidas y documentos técnicos (PDF) asociados a la tabla Documentos_Equipos.
