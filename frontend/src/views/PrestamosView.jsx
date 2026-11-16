@@ -6,6 +6,7 @@ import {
   Check,
   RotateCcw,
   Trash2,
+  Pencil,
   X,
   QrCode,
 } from 'lucide-react';
@@ -53,9 +54,45 @@ export default function PrestamosView({
   const filtrados = prestamos.filter((p) => {
     const q = `${p.nombre_equipo} ${p.nombre_solicitante || ''} ${
       p.codigo_universidad || ''
-    } ${p.serie_equipo || ''} ${p.estado_prestamo || ''}`.toLowerCase();
+    } ${p.serie_equipo || ''} ${p.serie_universidad || ''} ${
+      p.serie_laboratorio || ''
+    } ${p.estado_prestamo || ''}`.toLowerCase();
     return q.includes(busqueda.toLowerCase());
   });
+
+  // Agrupar préstamos del mismo estudiante (mismo código/nombre, fecha de préstamo y estado)
+  // para que todos los equipos que prestó se vean en una sola casilla/fila
+  const gruposPrestamos = React.useMemo(() => {
+    const mapa = new Map();
+    for (const p of filtrados) {
+      const claveSolicitante = (
+        p.codigo_universidad ||
+        p.nombre_solicitante ||
+        String(p.id_prestamo)
+      )
+        .trim()
+        .toLowerCase();
+      const claveFecha = (p.fecha_hora_prestamo || '').slice(0, 16);
+      const claveEstado = (p.estado_prestamo || 'Activo').toLowerCase();
+      const key = `${claveSolicitante}__${claveFecha}__${claveEstado}`;
+
+      if (!mapa.has(key)) {
+        mapa.set(key, {
+          key,
+          nombre_solicitante: p.nombre_solicitante,
+          codigo_universidad: p.codigo_universidad,
+          fecha_hora_prestamo: p.fecha_hora_prestamo,
+          fecha_hora_devolucion: p.fecha_hora_devolucion,
+          estado_prestamo: p.estado_prestamo || 'Activo',
+          observaciones_entrega: p.observaciones_entrega,
+          observaciones_devolucion: p.observaciones_devolucion,
+          items: [],
+        });
+      }
+      mapa.get(key).items.push(p);
+    }
+    return Array.from(mapa.values());
+  }, [filtrados]);
 
   const totalRegistros = String(prestamos.length).padStart(2, '0');
   const activosOVencidos = String(
@@ -65,6 +102,23 @@ export default function PrestamosView({
     new Set(prestamos.map((p) => p.id_equipo)).size
   ).padStart(2, '0');
 
+  // Identificar en tiempo real todos los equipos que tienen un préstamo activo (no devuelto)
+  const idsEquiposPrestadosActivos = React.useMemo(() => {
+    return new Set(
+      prestamos
+        .filter((p) => (p.estado_prestamo || '').toLowerCase() !== 'devuelto')
+        .map((p) => Number(p.id_equipo))
+    );
+  }, [prestamos]);
+
+  const equiposConEstadoPrestamo = React.useMemo(() => {
+    return (equipos || []).map((eq) => ({
+      ...eq,
+      en_prestamo:
+        Boolean(eq.en_prestamo) || idsEquiposPrestadosActivos.has(Number(eq.id_equipo)),
+    }));
+  }, [equipos, idsEquiposPrestadosActivos]);
+
   const handleCodigoDetectado = (codigo) => {
     if (scannerModo === 'historial') {
       setBusqueda(codigo);
@@ -73,7 +127,7 @@ export default function PrestamosView({
 
     if (scannerModo === 'formulario') {
       const q = codigo.toLowerCase();
-      const encontrado = equipos.find(
+      const encontrado = equiposConEstadoPrestamo.find(
         (eq) =>
           (eq.serie_universidad || '').toLowerCase() === q ||
           (eq.serie_laboratorio || '').toLowerCase() === q ||
@@ -83,6 +137,12 @@ export default function PrestamosView({
             .includes(q)
       );
       if (encontrado) {
+        if (encontrado.en_prestamo) {
+          alert(
+            `El equipo "${encontrado.nombre_equipo}" ya se encuentra en préstamo activo y no se puede volver a prestar hasta que sea devuelto.`
+          );
+          return;
+        }
         const strId = String(encontrado.id_equipo);
         setForm((prev) => ({
           ...prev,
@@ -142,27 +202,36 @@ export default function PrestamosView({
     }
   };
 
-  const marcarDevuelto = async (prestamo) => {
+  const marcarGrupoDevuelto = async (grupo) => {
     const obs = window.prompt(
       'Observaciones de devolución (opcional):',
-      prestamo.observaciones_devolucion || 'Recibido conforme en laboratorio.'
+      grupo.observaciones_devolucion || 'Recibido conforme en laboratorio.'
     );
     if (obs === null) return;
-    await api.actualizarEstadoPrestamo(
-      prestamo.id_prestamo,
-      {
-        estado_prestamo: 'Devuelto',
-        fecha_hora_devolucion: new Date().toISOString(),
-        observaciones_devolucion: obs,
-      },
-      esquemaListo
-    );
+    const fechaDev = new Date().toISOString();
+    for (const item of grupo.items) {
+      await api.actualizarEstadoPrestamo(
+        item.id_prestamo,
+        {
+          estado_prestamo: 'Devuelto',
+          fecha_hora_devolucion: fechaDev,
+          observaciones_devolucion: obs,
+        },
+        esquemaListo
+      );
+    }
     await onRefresh();
   };
 
-  const handleEliminar = async (id) => {
-    if (!window.confirm('¿Eliminar este registro de préstamo?')) return;
-    await api.eliminarPrestamo(id, esquemaListo);
+  const handleEliminarGrupo = async (grupo) => {
+    const msg =
+      grupo.items.length > 1
+        ? `¿Eliminar este préstamo con sus ${grupo.items.length} equipos asociados?`
+        : '¿Eliminar este registro de préstamo?';
+    if (!window.confirm(msg)) return;
+    for (const item of grupo.items) {
+      await api.eliminarPrestamo(item.id_prestamo, esquemaListo);
+    }
     await onRefresh();
   };
 
@@ -210,8 +279,9 @@ export default function PrestamosView({
                 Equipos Solicitados (Busca por nombre, serie universidad o serie laboratorio y selecciona uno o varios) *
               </label>
               <EquipoSearchSelect
-                equipos={equipos}
+                equipos={equiposConEstadoPrestamo}
                 multiple={true}
+                disableLoaned={true}
                 values={form.equipos_ids}
                 onChange={(ids) => setForm({ ...form, equipos_ids: ids })}
                 onOpenScanner={() => setScannerModo('formulario')}
@@ -363,7 +433,8 @@ export default function PrestamosView({
               </p>
             </div>
             <span className="px-3 py-1 rounded-full bg-[#EFF5F1] text-[#234735] text-xs font-semibold">
-              {filtrados.length} registros
+              {gruposPrestamos.length}{' '}
+              {gruposPrestamos.length === 1 ? 'préstamo' : 'préstamos'}
             </span>
           </div>
 
@@ -395,7 +466,7 @@ export default function PrestamosView({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-y border-emerald-100/80 bg-[#FAFDFB] text-[11px] font-bold uppercase tracking-wider text-[#6B8576]">
-                <th className="py-3.5 px-6">Equipo</th>
+                <th className="py-3.5 px-6">Equipos Prestados</th>
                 <th className="py-3.5 px-4">Solicitante</th>
                 <th className="py-3.5 px-4">Fecha de préstamo</th>
                 <th className="py-3.5 px-4">Devolución</th>
@@ -404,40 +475,61 @@ export default function PrestamosView({
               </tr>
             </thead>
             <tbody className="divide-y divide-emerald-50 text-sm">
-              {filtrados.map((p) => {
-                const esDevuelto = (p.estado_prestamo || '').toLowerCase() === 'devuelto';
+              {gruposPrestamos.map((grupo, idx) => {
+                const esDevuelto =
+                  (grupo.estado_prestamo || '').toLowerCase() === 'devuelto';
+                const observacionVisible =
+                  grupo.observaciones_devolucion || grupo.observaciones_entrega;
                 return (
-                  <tr key={p.id_prestamo} className="hover:bg-[#F7FBF8] transition-colors">
+                  <tr key={grupo.key} className="hover:bg-[#F7FBF8] transition-colors">
                     <td className="py-4 px-6">
-                      <div className="flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-xl bg-[#EEF6F1] border border-emerald-100 flex items-center justify-center text-[#1B5E43] shrink-0">
-                          <FlaskConical size={18} />
-                        </div>
-                        <div>
-                          <p className="font-bold text-[#14281D]">{p.nombre_equipo}</p>
-                          <p className="text-xs text-[#6B8576]">
-                            {p.observaciones_entrega || 'Equipo relacionado'}
+                      <div className="space-y-3">
+                        {grupo.items.map((item) => (
+                          <div
+                            key={item.id_prestamo}
+                            className="flex items-center gap-3.5"
+                          >
+                            <div className="w-10 h-10 rounded-xl bg-[#EEF6F1] border border-emerald-100 flex items-center justify-center text-[#1B5E43] shrink-0">
+                              <FlaskConical size={18} />
+                            </div>
+                            <div>
+                              <p className="font-bold text-[#14281D] leading-snug">
+                                {item.nombre_equipo}
+                              </p>
+                              <p className="text-xs text-[#6B8576]">
+                                Univ: {item.serie_universidad || 'N/A'} &middot; Lab:{' '}
+                                {item.serie_laboratorio || item.serie_equipo || 'N/A'}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+
+                        {observacionVisible && (
+                          <p className="text-xs text-[#6B8576] pt-0.5">
+                            Obs: {observacionVisible}
                           </p>
-                        </div>
+                        )}
                       </div>
                     </td>
 
-                    <td className="py-4 px-4">
-                      <p className="font-bold text-[#14281D]">{p.nombre_solicitante}</p>
+                    <td className="py-4 px-4 align-middle">
+                      <p className="font-bold text-[#14281D]">{grupo.nombre_solicitante}</p>
                       <p className="text-xs text-[#6B8576]">
-                        Código universidad: {p.codigo_universidad}
+                        Código: {grupo.codigo_universidad} &middot; Préstamo #
+                        {gruposPrestamos.length - idx} &middot; {grupo.items.length}{' '}
+                        {grupo.items.length === 1 ? 'equipo' : 'equipos'}
                       </p>
                     </td>
 
-                    <td className="py-4 px-4 text-xs font-medium text-[#526B5C]">
-                      {formatearFechaHora(p.fecha_hora_prestamo)}
+                    <td className="py-4 px-4 text-xs font-medium text-[#526B5C] align-middle">
+                      {formatearFechaHora(grupo.fecha_hora_prestamo)}
                     </td>
 
-                    <td className="py-4 px-4 text-xs font-medium text-[#526B5C]">
-                      {formatearFechaHora(p.fecha_hora_devolucion)}
+                    <td className="py-4 px-4 text-xs font-medium text-[#526B5C] align-middle">
+                      {formatearFechaHora(grupo.fecha_hora_devolucion)}
                     </td>
 
-                    <td className="py-4 px-4">
+                    <td className="py-4 px-4 align-middle">
                       {esDevuelto ? (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#E7F5ED] text-[#145338]">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#1B5E43]" />
@@ -446,23 +538,32 @@ export default function PrestamosView({
                       ) : (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white border border-[#1B5E43] text-[#1B5E43]">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#1B5E43]" />
-                          {p.estado_prestamo || 'Activo'}
+                          {grupo.estado_prestamo || 'Activo'}
                         </span>
                       )}
                     </td>
 
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-4 px-6 text-right align-middle">
                       <div className="inline-flex items-center gap-1.5">
-                        {!esDevuelto && (
+                        {!esDevuelto ? (
                           <button
-                            onClick={() => marcarDevuelto(p)}
+                            onClick={() => marcarGrupoDevuelto(grupo)}
                             className="px-3 py-1.5 rounded-xl bg-[#EEF6F1] text-[#1B5E43] hover:bg-[#1B5E43] hover:text-white transition-colors text-xs font-semibold flex items-center gap-1.5"
                           >
                             <RotateCcw size={13} /> Recibir
                           </button>
+                        ) : (
+                          <button
+                            onClick={() => marcarGrupoDevuelto(grupo)}
+                            title="Editar observación de devolución"
+                            className="p-2 rounded-xl text-[#6B8576] hover:bg-emerald-50 hover:text-[#14281D]"
+                          >
+                            <Pencil size={15} />
+                          </button>
                         )}
                         <button
-                          onClick={() => handleEliminar(p.id_prestamo)}
+                          onClick={() => handleEliminarGrupo(grupo)}
+                          title="Eliminar préstamo"
                           className="p-2 rounded-xl text-[#6B8576] hover:bg-emerald-50 hover:text-[#14281D]"
                         >
                           <Trash2 size={15} />
@@ -473,7 +574,7 @@ export default function PrestamosView({
                 );
               })}
 
-              {filtrados.length === 0 && (
+              {gruposPrestamos.length === 0 && (
                 <tr>
                   <td colSpan="6" className="py-12 text-center text-sm text-[#6B8576]">
                     No se encontraron préstamos registrados.

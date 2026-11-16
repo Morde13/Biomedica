@@ -9,6 +9,7 @@ import {
   Cpu,
   Layers,
   Copy,
+  Link2,
   X,
 } from 'lucide-react';
 import { api } from '../services/api';
@@ -77,6 +78,7 @@ export default function RegistroEquipoView({
   const [importarModalOpen, setImportarModalOpen] = useState(false);
   const [mensajeImportacion, setMensajeImportacion] = useState('');
   const [tipoDocActual, setTipoDocActual] = useState('');
+  const [linkDocActual, setLinkDocActual] = useState('');
   const [descImgActual, setDescImgActual] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
@@ -217,24 +219,49 @@ export default function RegistroEquipoView({
     setComponentes((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const handleAgregarLinkDoc = () => {
+    const raw = linkDocActual.trim();
+    if (!raw) return;
+    const urlFinal = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const td = (catalogos.tipos_documentos || []).find(
+      (t) => Number(t.id) === Number(tipoDocActual)
+    );
+    const tipoEtiqueta = td ? td.descripcion : 'Link de interés';
+    setDocumentos((prev) => [
+      ...prev,
+      {
+        id_tipo_doc: tipoDocActual ? Number(tipoDocActual) : null,
+        tipo_etiqueta: tipoEtiqueta,
+        nombre_archivo: urlFinal,
+        ruta_archivo_pdf: urlFinal,
+      },
+    ]);
+    setLinkDocActual('');
+  };
+
   const handleUploadDatasheet = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setSubiendoArchivo(true);
     try {
-      const res = await api.subirArchivo('datasheets', file);
       const td = (catalogos.tipos_documentos || []).find(
         (t) => Number(t.id) === Number(tipoDocActual)
       );
-      setDocumentos((prev) => [
-        ...prev,
-        {
+      const tipoEtiqueta = td ? td.descripcion : 'Documento General';
+      const nuevosDocs = [];
+      for (const file of files) {
+        const res = await api.subirArchivo('datasheets', file, {
+          tipo_documento: tipoEtiqueta,
+          nombre_equipo: form.nombre_equipo || 'Equipo',
+        });
+        nuevosDocs.push({
           id_tipo_doc: tipoDocActual ? Number(tipoDocActual) : null,
-          tipo_etiqueta: td ? td.descripcion : 'Documento General',
-          nombre_archivo: file.name,
+          tipo_etiqueta: tipoEtiqueta,
+          nombre_archivo: res.nombre_archivo || file.name,
           ruta_archivo_pdf: res.ruta,
-        },
-      ]);
+        });
+      }
+      setDocumentos((prev) => [...prev, ...nuevosDocs]);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -244,18 +271,22 @@ export default function RegistroEquipoView({
   };
 
   const handleUploadImagen = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setSubiendoArchivo(true);
     try {
-      const res = await api.subirArchivo('imagenes', file);
-      setImagenes((prev) => [
-        ...prev,
-        {
-          descripcion_imagen: descImgActual || file.name,
+      const nuevasImgs = [];
+      for (const file of files) {
+        const res = await api.subirArchivo('imagenes', file, {
+          tipo_documento: descImgActual || 'Fotografia',
+          nombre_equipo: form.nombre_equipo || 'Equipo',
+        });
+        nuevasImgs.push({
+          descripcion_imagen: descImgActual || res.nombre_archivo || file.name,
           ruta_imagen: res.ruta,
-        },
-      ]);
+        });
+      }
+      setImagenes((prev) => [...prev, ...nuevasImgs]);
       setDescImgActual('');
     } catch (err) {
       alert(err.message);
@@ -1098,10 +1129,10 @@ export default function RegistroEquipoView({
             <FileText size={18} className="text-[#1B5E43]" />
             <div>
               <h2 className="text-base font-bold text-[#14281D]">
-                4. Datasheets y Manuales
+                4. Datasheets, Manuales y Links de Interés
               </h2>
               <p className="text-xs text-[#6B8576]">
-                Puedes elegir un tipo, subir su PDF, y luego cambiar de tipo para subir otro sin que se borre el anterior
+                Elige un tipo de documento para subir su PDF o agregar un enlace web (video, página del fabricante, etc.)
               </p>
             </div>
           </div>
@@ -1113,7 +1144,7 @@ export default function RegistroEquipoView({
                 onChange={(e) => setTipoDocActual(e.target.value)}
                 className={`${inputClass} flex-1`}
               >
-                <option value="">-- Tipo de documento --</option>
+                <option value="">-- Tipo de documento o link --</option>
                 {(catalogos.tipos_documentos || []).map((td) => (
                   <option key={td.id} value={td.id}>
                     {td.descripcion}
@@ -1150,6 +1181,31 @@ export default function RegistroEquipoView({
             </label>
           </div>
 
+          {/* Barra para agregar un Link de interés / URL externa */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={linkDocActual}
+              onChange={(e) => setLinkDocActual(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAgregarLinkDoc();
+                }
+              }}
+              placeholder="O pega aquí un link de interés (https://...)"
+              className={`${inputClass} flex-1`}
+            />
+            <button
+              type="button"
+              onClick={handleAgregarLinkDoc}
+              className="px-4 py-2.5 rounded-xl bg-[#EEF6F1] border border-emerald-200 text-[#1B5E43] hover:bg-[#1B5E43] hover:text-white transition-colors text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0"
+            >
+              <Link2 size={15} />
+              Agregar Link
+            </button>
+          </div>
+
           <div className="space-y-2">
             {documentos.map((d, i) => (
               <div
@@ -1166,7 +1222,12 @@ export default function RegistroEquipoView({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setDocumentos((prev) => prev.filter((_, idx) => idx !== i))}
+                  onClick={() => {
+                    if (d.ruta_archivo_pdf) {
+                      api.eliminarArchivoTemporal(d.ruta_archivo_pdf).catch(() => {});
+                    }
+                    setDocumentos((prev) => prev.filter((_, idx) => idx !== i));
+                  }}
                   className="text-emerald-800 hover:underline shrink-0 font-semibold"
                 >
                   Quitar
@@ -1205,10 +1266,11 @@ export default function RegistroEquipoView({
             />
             <label className="cursor-pointer px-4 py-2.5 rounded-xl bg-[#1B5E43] text-white text-xs font-semibold hover:bg-[#144732] flex items-center justify-center gap-2 shrink-0">
               <Upload size={15} />
-              {subiendoArchivo ? 'Subiendo...' : 'Subir Imagen'}
+              {subiendoArchivo ? 'Subiendo...' : 'Subir Imágenes'}
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleUploadImagen}
                 className="hidden"
               />
@@ -1228,7 +1290,12 @@ export default function RegistroEquipoView({
                 />
                 <button
                   type="button"
-                  onClick={() => setImagenes((prev) => prev.filter((_, idx) => idx !== i))}
+                  onClick={() => {
+                    if (img.ruta_imagen) {
+                      api.eliminarArchivoTemporal(img.ruta_imagen).catch(() => {});
+                    }
+                    setImagenes((prev) => prev.filter((_, idx) => idx !== i));
+                  }}
                   className="absolute top-1 right-1 bg-white/90 text-[#14281D] rounded-lg p-1 text-[10px] font-bold"
                 >
                   ✕

@@ -348,6 +348,8 @@ export default function EstudianteView({
                         <img
                           src={imgs[0].ruta_imagen}
                           alt={eq.nombre_equipo}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                       </button>
@@ -375,6 +377,8 @@ export default function EstudianteView({
                               <img
                                 src={img.ruta_imagen}
                                 alt={img.descripcion_imagen || eq.nombre_equipo}
+                                loading="lazy"
+                                decoding="async"
                                 className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                               />
                               {slotIdx === 3 && imgs.length > 4 && (

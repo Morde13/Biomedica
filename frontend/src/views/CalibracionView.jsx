@@ -86,11 +86,17 @@ export default function CalibracionView({
     if (!file) return;
     setSubiendo(true);
     try {
-      const res = await api.subirArchivo('calibraciones', file);
+      const eqSel = (equipos || []).find(
+        (eq) => Number(eq.id_equipo) === Number(form.id_equipo)
+      );
+      const res = await api.subirArchivo('calibraciones', file, {
+        tipo_documento: 'Certificado_Calibracion',
+        nombre_equipo: eqSel ? eqSel.nombre_equipo : 'Equipo',
+      });
       setForm((prev) => ({
         ...prev,
         ruta_certificado_pdf: res.ruta,
-        nombre_pdf: file.name,
+        nombre_pdf: res.nombre_archivo || file.name,
       }));
     } catch (err) {
       alert(err.message);

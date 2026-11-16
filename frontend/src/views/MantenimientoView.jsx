@@ -89,11 +89,22 @@ export default function MantenimientoView({
     if (!file) return;
     setSubiendo(true);
     try {
-      const res = await api.subirArchivo('mantenimientos', file);
+      const eqSel = (equipos || []).find(
+        (eq) => Number(eq.id_equipo) === Number(form.id_equipo)
+      );
+      const tipoMant = (catalogos.tipos_mantenimiento || []).find(
+        (t) => Number(t.id) === Number(form.id_tipo_mantenimiento)
+      );
+      const res = await api.subirArchivo('mantenimientos', file, {
+        tipo_documento: tipoMant
+          ? `Mantenimiento_${tipoMant.descripcion}`
+          : 'Reporte_Mantenimiento',
+        nombre_equipo: eqSel ? eqSel.nombre_equipo : 'Equipo',
+      });
       setForm((prev) => ({
         ...prev,
         ruta_evidencia_pdf: res.ruta,
-        nombre_pdf: file.name,
+        nombre_pdf: res.nombre_archivo || file.name,
       }));
     } catch (err) {
       alert(err.message);

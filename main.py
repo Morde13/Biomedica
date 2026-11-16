@@ -3,12 +3,13 @@ import hmac
 import os
 import re
 import time
+import unicodedata
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, inspect, text
@@ -71,7 +72,7 @@ app.add_middleware(
 # Reemplaza 'usuario', 'contraseña', '127.0.0.1' y 'nombre_bd' con tus datos reales o usa la variable de entorno DATABASE_URL
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "mysql+pymysql://biomedica:Biomedica2026%40.@172.16.151.55:3306/Inventario_Biomedica",
+    "mysql+pymysql://Biomedica:biomedica2026%40@192.168.1.13:3306/Prueba_Biomedica",
 )
 
 # 2. Crear el motor de base de datos
@@ -99,7 +100,24 @@ app.mount("/archivos/imagenes", StaticFiles(directory=str(STORAGE_DIRS["imagenes
 app.mount("/archivos/calibraciones", StaticFiles(directory=str(STORAGE_DIRS["calibraciones"])), name="calibraciones")
 app.mount("/archivos/mantenimientos", StaticFiles(directory=str(STORAGE_DIRS["mantenimientos"])), name="mantenimientos")
 app.mount("/archivos/img", StaticFiles(directory=str(STORAGE_DIRS["img"])), name="img")
+app.mount("/api/archivos/datasheets", StaticFiles(directory=str(STORAGE_DIRS["datasheets"])), name="api_datasheets")
+app.mount("/api/archivos/imagenes", StaticFiles(directory=str(STORAGE_DIRS["imagenes"])), name="api_imagenes")
+app.mount("/api/archivos/calibraciones", StaticFiles(directory=str(STORAGE_DIRS["calibraciones"])), name="api_calibraciones")
+app.mount("/api/archivos/mantenimientos", StaticFiles(directory=str(STORAGE_DIRS["mantenimientos"])), name="api_mantenimientos")
+app.mount("/api/archivos/img", StaticFiles(directory=str(STORAGE_DIRS["img"])), name="api_img")
 app.mount("/img", StaticFiles(directory=str(STORAGE_DIRS["img"])), name="img_root")
+
+
+def normalizar_ruta_publica(ruta: Optional[str]) -> Optional[str]:
+    """
+    Asegura que las rutas de archivos apunten a /api/archivos/... para que
+    pasen transparentemente por el proxy location /api/ de Nginx en DietPi.
+    """
+    if not ruta:
+        return ruta
+    if ruta.startswith("/archivos/"):
+        return f"/api{ruta}"
+    return ruta
 
 TABLAS_ESQUEMA_19 = [
     "Sedes",
@@ -266,8 +284,25 @@ def obtener_logo_universidad():
     }
 
 
+def _limpiar_segmento_nombre(texto: Optional[str], por_defecto: str) -> str:
+    if not texto or not texto.strip():
+        return por_defecto
+    sin_acentos = (
+        unicodedata.normalize("NFKD", texto.strip())
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    limpio = re.sub(r"[^a-zA-Z0-9-]+", "_", sin_acentos).strip("_")
+    return limpio or por_defecto
+
+
 @app.post("/api/upload/{categoria}")
-async def subir_archivo(categoria: str, file: UploadFile = File(...)):
+async def subir_archivo(
+    categoria: str,
+    file: UploadFile = File(...),
+    tipo_documento: Optional[str] = Form(None),
+    nombre_equipo: Optional[str] = Form(None),
+):
     if categoria == "img":
         raise HTTPException(
             status_code=403,
@@ -277,23 +312,115 @@ async def subir_archivo(categoria: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Categoría inválida: {categoria}")
 
     nombre_original = file.filename or "archivo"
-    nombre_limpio = re.sub(r"[^a-zA-Z0-9._-]", "_", nombre_original)
+    ext = Path(nombre_original).suffix.lower()
+    if not ext:
+        ext = ".webp" if categoria == "imagenes" else ".pdf"
 
-    sello = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
-    nombre_final = f"{sello}_{nombre_limpio}"
+    # Formato solicitado: Fecha (Año-Mes-Día) + Hora-Minuto-Segundo + Tipo de Documento + Nombre del Equipo
+    fecha_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    etiqueta_por_defecto = (
+        "Fotografia"
+        if categoria == "imagenes"
+        else "Mantenimiento"
+        if categoria == "mantenimientos"
+        else "Calibracion"
+        if categoria == "calibraciones"
+        else "Documento"
+    )
+    seg_tipo = _limpiar_segmento_nombre(tipo_documento, etiqueta_por_defecto)
+    seg_equipo = _limpiar_segmento_nombre(nombre_equipo, "Equipo")
 
+    base_nombre = f"{fecha_hora}_{seg_tipo}_{seg_equipo}"
+    nombre_final = f"{base_nombre}{ext}"
     destino = STORAGE_DIRS[categoria] / nombre_final
+
+    # Si se suben varios archivos en el mismo segundo, agrega consecutivo para no sobrescribir
+    consecutivo = 2
+    while destino.exists():
+        nombre_final = f"{base_nombre}_{consecutivo}{ext}"
+        destino = STORAGE_DIRS[categoria] / nombre_final
+        consecutivo += 1
+
     contenido = await file.read()
     with open(destino, "wb") as f:
         f.write(contenido)
 
-    ruta_publica = f"/archivos/{categoria}/{nombre_final}"
+    ruta_publica = f"/api/archivos/{categoria}/{nombre_final}"
     return {
         "mensaje": "Archivo almacenado correctamente",
         "nombre_archivo": nombre_final,
         "ruta": ruta_publica,
         "categoria": categoria,
     }
+
+
+def _eliminar_archivo_fisico_si_huerfano(ruta_publica: Optional[str], db: Session):
+    """
+    Elimina físicamente el archivo de su carpeta en el servidor únicamente si
+    ningún otro registro en la base de datos sigue haciendo referencia a él.
+    """
+    if not ruta_publica:
+        return
+    try:
+        limpia = ruta_publica.strip()
+        if limpia.startswith("/api/archivos/"):
+            rel = limpia[len("/api/archivos/") :]
+        elif limpia.startswith("/archivos/"):
+            rel = limpia[len("/archivos/") :]
+        else:
+            return
+
+        partes = rel.split("/", 1)
+        if len(partes) != 2:
+            return
+        categoria, nombre_archivo = partes[0], Path(partes[1]).name
+        if categoria == "img" or categoria not in STORAGE_DIRS:
+            return
+
+        variantes = [
+            f"/api/archivos/{categoria}/{nombre_archivo}",
+            f"/archivos/{categoria}/{nombre_archivo}",
+        ]
+
+        en_uso = 0
+        if categoria == "datasheets":
+            en_uso = (
+                db.query(DocumentoEquipo)
+                .filter(DocumentoEquipo.ruta_archivo_pdf.in_(variantes))
+                .count()
+            )
+        elif categoria == "imagenes":
+            en_uso = (
+                db.query(ImagenEquipo)
+                .filter(ImagenEquipo.ruta_imagen.in_(variantes))
+                .count()
+            )
+        elif categoria == "mantenimientos":
+            en_uso = (
+                db.query(RegistroMantenimiento)
+                .filter(RegistroMantenimiento.ruta_evidencia_pdf.in_(variantes))
+                .count()
+            )
+        elif categoria == "calibraciones":
+            en_uso = (
+                db.query(RegistroCalibracion)
+                .filter(RegistroCalibracion.ruta_certificado_pdf.in_(variantes))
+                .count()
+            )
+
+        if en_uso == 0:
+            carpeta_base = STORAGE_DIRS[categoria].resolve()
+            archivo_fisico = (carpeta_base / nombre_archivo).resolve()
+            if archivo_fisico.parent == carpeta_base and archivo_fisico.is_file():
+                archivo_fisico.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+@app.delete("/api/upload")
+def eliminar_archivo_temporal(ruta: str, db: Session = Depends(get_db)):
+    _eliminar_archivo_fisico_si_huerfano(ruta, db)
+    return {"mensaje": "Archivo eliminado de la carpeta"}
 
 
 # =======================================================
@@ -378,6 +505,19 @@ def crear_sede(payload: SedeCreate, db: Session = Depends(get_db)):
     return {"id_sede": nueva.id_sede, "nombre_sede": nueva.nombre_sede}
 
 
+@app.delete("/api/sedes/{id_sede}")
+def eliminar_sede(id_sede: int, db: Session = Depends(get_db)):
+    sede = db.query(Sede).filter(Sede.id_sede == id_sede).first()
+    if not sede:
+        raise HTTPException(status_code=404, detail="Sede no encontrada")
+    db.query(Laboratorio).filter(Laboratorio.id_sede == id_sede).update(
+        {Laboratorio.id_sede: None}, synchronize_session=False
+    )
+    db.delete(sede)
+    db.commit()
+    return {"mensaje": "Sede eliminada correctamente"}
+
+
 @app.post("/api/laboratorios")
 def crear_laboratorio(payload: LaboratorioCreate, db: Session = Depends(get_db)):
     nuevo = Laboratorio(
@@ -394,6 +534,19 @@ def crear_laboratorio(payload: LaboratorioCreate, db: Session = Depends(get_db))
     }
 
 
+@app.delete("/api/laboratorios/{id_laboratorio}")
+def eliminar_laboratorio(id_laboratorio: int, db: Session = Depends(get_db)):
+    lab = db.query(Laboratorio).filter(Laboratorio.id_laboratorio == id_laboratorio).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Laboratorio no encontrado")
+    db.query(Equipo).filter(Equipo.id_laboratorio == id_laboratorio).update(
+        {Equipo.id_laboratorio: None}, synchronize_session=False
+    )
+    db.delete(lab)
+    db.commit()
+    return {"mensaje": "Laboratorio eliminado correctamente"}
+
+
 @app.post("/api/proveedores")
 def crear_proveedor(payload: ProveedorCreate, db: Session = Depends(get_db)):
     nuevo = Proveedor(**payload.model_dump())
@@ -408,6 +561,19 @@ def crear_proveedor(payload: ProveedorCreate, db: Session = Depends(get_db)):
     }
 
 
+@app.delete("/api/proveedores/{id_proveedor}")
+def eliminar_proveedor(id_proveedor: int, db: Session = Depends(get_db)):
+    prov = db.query(Proveedor).filter(Proveedor.id_proveedor == id_proveedor).first()
+    if not prov:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+    db.query(Equipo).filter(Equipo.id_proveedor == id_proveedor).update(
+        {Equipo.id_proveedor: None}, synchronize_session=False
+    )
+    db.delete(prov)
+    db.commit()
+    return {"mensaje": "Proveedor eliminado correctamente"}
+
+
 CATALOGO_MAP = {
     "tipos_movilidad": (TipoMovilidad, "id_tipo_movilidad", "descripcion"),
     "tipos_adquisicion": (TipoAdquisicion, "id_tipo_adquisicion", "descripcion"),
@@ -417,6 +583,17 @@ CATALOGO_MAP = {
     "fuentes_alimentacion": (CatalogoFuenteAlimentacion, "id_fuente", "descripcion"),
     "tecnologias": (CatalogoTecnologia, "id_tecnologia", "descripcion"),
     "tipos_mantenimiento": (TipoMantenimiento, "id_tipo_mantenimiento", "descripcion"),
+}
+
+CATALOGO_FK_CLEANUP = {
+    "tipos_movilidad": (Equipo, "id_tipo_movilidad"),
+    "tipos_adquisicion": (Equipo, "id_tipo_adquisicion"),
+    "clasificacion_riesgos": (Equipo, "id_riesgo"),
+    "clasificacion_usos": (Equipo, "id_uso"),
+    "tipos_documentos": (DocumentoEquipo, "id_tipo_doc"),
+    "fuentes_alimentacion": (EspecificacionTecnica, "id_fuente"),
+    "tecnologias": (EspecificacionTecnica, "id_tecnologia"),
+    "tipos_mantenimiento": (RegistroMantenimiento, "id_tipo_mantenimiento"),
 }
 
 
@@ -432,6 +609,28 @@ def crear_item_catalogo(
     db.commit()
     db.refresh(instancia)
     return {"id": getattr(instancia, pk_attr), "descripcion": getattr(instancia, text_attr)}
+
+
+@app.delete("/api/catalogos/{nombre_catalogo}/{id_item}")
+def eliminar_item_catalogo(
+    nombre_catalogo: str, id_item: int, db: Session = Depends(get_db)
+):
+    if nombre_catalogo not in CATALOGO_MAP:
+        raise HTTPException(status_code=400, detail="Catálogo no reconocido")
+    modelo, pk_attr, _ = CATALOGO_MAP[nombre_catalogo]
+    instancia = db.query(modelo).filter(getattr(modelo, pk_attr) == id_item).first()
+    if not instancia:
+        raise HTTPException(status_code=404, detail="Elemento de catálogo no encontrado")
+
+    if nombre_catalogo in CATALOGO_FK_CLEANUP:
+        ref_model, ref_col = CATALOGO_FK_CLEANUP[nombre_catalogo]
+        db.query(ref_model).filter(getattr(ref_model, ref_col) == id_item).update(
+            {getattr(ref_model, ref_col): None}, synchronize_session=False
+        )
+
+    db.delete(instancia)
+    db.commit()
+    return {"mensaje": "Opción eliminada correctamente"}
 
 
 # =======================================================
@@ -512,7 +711,7 @@ def serializar_equipo(eq: Equipo) -> dict:
                 "id_documento": d.id_documento,
                 "id_tipo_doc": d.id_tipo_doc,
                 "nombre_tipo": d.tipo_documento.nombre_tipo if d.tipo_documento else "Documento PDF",
-                "ruta_archivo_pdf": d.ruta_archivo_pdf,
+                "ruta_archivo_pdf": normalizar_ruta_publica(d.ruta_archivo_pdf),
             }
             for d in (eq.documentos or [])
         ],
@@ -520,7 +719,7 @@ def serializar_equipo(eq: Equipo) -> dict:
             {
                 "id_imagen": img.id_imagen,
                 "descripcion_imagen": img.descripcion_imagen,
-                "ruta_imagen": img.ruta_imagen,
+                "ruta_imagen": normalizar_ruta_publica(img.ruta_imagen),
             }
             for img in (eq.imagenes or [])
         ],
@@ -659,8 +858,10 @@ def eliminar_documento_equipo(id_documento: int, db: Session = Depends(get_db)):
     doc = db.query(DocumentoEquipo).filter(DocumentoEquipo.id_documento == id_documento).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
+    ruta = doc.ruta_archivo_pdf
     db.delete(doc)
     db.commit()
+    _eliminar_archivo_fisico_si_huerfano(ruta, db)
     return {"mensaje": "Documento eliminado"}
 
 
@@ -669,8 +870,10 @@ def eliminar_imagen_equipo(id_imagen: int, db: Session = Depends(get_db)):
     img = db.query(ImagenEquipo).filter(ImagenEquipo.id_imagen == id_imagen).first()
     if not img:
         raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    ruta = img.ruta_imagen
     db.delete(img)
     db.commit()
+    _eliminar_archivo_fisico_si_huerfano(ruta, db)
     return {"mensaje": "Imagen eliminada"}
 
 
@@ -709,11 +912,33 @@ def agregar_componente_equipo(
 
 @app.delete("/api/equipos/{id_equipo}")
 def eliminar_equipo(id_equipo: int, db: Session = Depends(get_db)):
-    eq = db.query(Equipo).filter(Equipo.id_equipo == id_equipo).first()
+    eq = (
+        db.query(Equipo)
+        .options(
+            selectinload(Equipo.documentos),
+            selectinload(Equipo.imagenes),
+            selectinload(Equipo.mantenimientos),
+            selectinload(Equipo.calibraciones),
+        )
+        .filter(Equipo.id_equipo == id_equipo)
+        .first()
+    )
     if not eq:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")
+
+    rutas_asociadas = (
+        [d.ruta_archivo_pdf for d in (eq.documentos or []) if d.ruta_archivo_pdf]
+        + [i.ruta_imagen for i in (eq.imagenes or []) if i.ruta_imagen]
+        + [m.ruta_evidencia_pdf for m in (eq.mantenimientos or []) if m.ruta_evidencia_pdf]
+        + [c.ruta_certificado_pdf for c in (eq.calibraciones or []) if c.ruta_certificado_pdf]
+    )
+
     db.delete(eq)
     db.commit()
+
+    for ruta in set(rutas_asociadas):
+        _eliminar_archivo_fisico_si_huerfano(ruta, db)
+
     return {"mensaje": "Equipo eliminado correctamente"}
 
 
@@ -756,7 +981,7 @@ def listar_mantenimientos(db: Session = Depends(get_db)):
                 ),
                 "responsable_mantenimiento": r.responsable_mantenimiento,
                 "costo": float(r.costo) if r.costo is not None else 0.0,
-                "ruta_evidencia_pdf": r.ruta_evidencia_pdf,
+                "ruta_evidencia_pdf": normalizar_ruta_publica(r.ruta_evidencia_pdf),
             }
             for r in registros
         ]
@@ -789,8 +1014,10 @@ def eliminar_mantenimiento(id_registro: int, db: Session = Depends(get_db)):
     )
     if not reg:
         raise HTTPException(status_code=404, detail="Registro de mantenimiento no encontrado")
+    ruta = reg.ruta_evidencia_pdf
     db.delete(reg)
     db.commit()
+    _eliminar_archivo_fisico_si_huerfano(ruta, db)
     return {"mensaje": "Registro eliminado"}
 
 
@@ -826,7 +1053,7 @@ def listar_calibraciones(db: Session = Depends(get_db)):
                 ),
                 "entidad_calibradora": r.entidad_calibradora,
                 "resultado_conforme": bool(r.resultado_conforme),
-                "ruta_certificado_pdf": r.ruta_certificado_pdf,
+                "ruta_certificado_pdf": normalizar_ruta_publica(r.ruta_certificado_pdf),
             }
             for r in registros
         ]
@@ -859,8 +1086,10 @@ def eliminar_calibracion(id_registro: int, db: Session = Depends(get_db)):
     )
     if not reg:
         raise HTTPException(status_code=404, detail="Registro de calibración no encontrado")
+    ruta = reg.ruta_certificado_pdf
     db.delete(reg)
     db.commit()
+    _eliminar_archivo_fisico_si_huerfano(ruta, db)
     return {"mensaje": "Registro eliminado"}
 
 
@@ -885,6 +1114,8 @@ def listar_prestamos(db: Session = Depends(get_db)):
                 "id_equipo": r.id_equipo,
                 "nombre_equipo": r.equipo.nombre_equipo if r.equipo else "Equipo eliminado",
                 "serie_equipo": r.equipo.serie_equipo if r.equipo else None,
+                "serie_universidad": r.equipo.serie_universidad if r.equipo else None,
+                "serie_laboratorio": r.equipo.serie_laboratorio if r.equipo else None,
                 "id_laboratorio": r.equipo.id_laboratorio if r.equipo else None,
                 "nombre_laboratorio": (
                     r.equipo.laboratorio.nombre_laboratorio
@@ -911,6 +1142,30 @@ def listar_prestamos(db: Session = Depends(get_db)):
 
 @app.post("/api/prestamos")
 def crear_prestamo(payload: PrestamoCreate, db: Session = Depends(get_db)):
+    if (payload.estado_prestamo or "Activo").strip().lower() != "devuelto":
+        prestamo_activo = (
+            db.query(PrestamoEquipo)
+            .options(joinedload(PrestamoEquipo.equipo))
+            .filter(
+                PrestamoEquipo.id_equipo == payload.id_equipo,
+                PrestamoEquipo.estado_prestamo != "Devuelto",
+            )
+            .first()
+        )
+        if prestamo_activo:
+            nombre_eq = (
+                prestamo_activo.equipo.nombre_equipo
+                if prestamo_activo.equipo
+                else f"ID #{payload.id_equipo}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"El equipo '{nombre_eq}' ya se encuentra prestado a "
+                    f"{prestamo_activo.nombre_solicitante} y no se puede prestar otra vez "
+                    "hasta que sea devuelto."
+                ),
+            )
     try:
         nuevo = PrestamoEquipo(**payload.model_dump())
         db.add(nuevo)
@@ -920,6 +1175,8 @@ def crear_prestamo(payload: PrestamoCreate, db: Session = Depends(get_db)):
             "mensaje": "Préstamo registrado exitosamente",
             "id_prestamo": nuevo.id_prestamo,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al guardar préstamo: {str(e)}")

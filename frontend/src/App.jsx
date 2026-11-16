@@ -30,13 +30,55 @@ import EstudianteView from './views/EstudianteView';
 import CatalogosModal from './components/CatalogosModal';
 
 const SESSION_KEY = 'labora_admin_session_v2';
+const CACHE_KEY = 'labora_cache_v1';
+const ACTIVE_TAB_KEY = 'labora_active_tab_v1';
+const SELECTED_LAB_KEY = 'labora_selected_lab_v1';
+
+function leerCacheInicial() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('Inventario');
+  const cacheInicial = useMemo(() => leerCacheInicial(), []);
+
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem(ACTIVE_TAB_KEY) || 'Inventario';
+    } catch {
+      return 'Inventario';
+    }
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [selectedLabId, setSelectedLabId] = useState('all');
+  const [selectedLabId, setSelectedLabId] = useState(() => {
+    try {
+      return localStorage.getItem(SELECTED_LAB_KEY) || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+    } catch {
+      // Ignorar errores de cuota de almacenamiento
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SELECTED_LAB_KEY, selectedLabId);
+    } catch {
+      // Ignorar errores de cuota de almacenamiento
+    }
+  }, [selectedLabId]);
 
   const workspaceDropdownRef = useRef(null);
   const profileMenuRef = useRef(null);
@@ -75,59 +117,143 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [autenticando, setAutenticando] = useState(false);
 
-  const [estadoBd, setEstadoBd] = useState({ conectado: false, esquema_listo: false });
+  const [estadoBd, setEstadoBd] = useState(
+    () => cacheInicial.estadoBd || { conectado: true, esquema_listo: true }
+  );
   const logoUrl = '/img/escudo_universidad.png';
-  const [catalogos, setCatalogos] = useState({});
-  const [equipos, setEquipos] = useState([]);
-  const [mantenimientos, setMantenimientos] = useState([]);
-  const [calibraciones, setCalibraciones] = useState([]);
-  const [prestamos, setPrestamos] = useState([]);
-  const [roles, setRoles] = useState([]);
-  const [usuarios, setUsuarios] = useState([]);
+  const [catalogos, setCatalogos] = useState(() => cacheInicial.catalogos || {});
+  const [equipos, setEquipos] = useState(() => cacheInicial.equipos || []);
+  const [mantenimientos, setMantenimientos] = useState(
+    () => cacheInicial.mantenimientos || []
+  );
+  const [calibraciones, setCalibraciones] = useState(
+    () => cacheInicial.calibraciones || []
+  );
+  const [prestamos, setPrestamos] = useState(() => cacheInicial.prestamos || []);
+  const [roles, setRoles] = useState(() => cacheInicial.roles || []);
+  const [usuarios, setUsuarios] = useState(() => cacheInicial.usuarios || []);
 
   const [catalogosModalOpen, setCatalogosModalOpen] = useState(false);
   const [catalogosInitialConfig, setCatalogosInitialConfig] = useState(null);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+
+  // Guardar instantáneamente en caché local cuando cambian los datos
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({
+          estadoBd,
+          catalogos,
+          equipos,
+          mantenimientos,
+          calibraciones,
+          prestamos,
+          roles,
+          usuarios,
+        })
+      );
+    } catch {
+      // Si el almacenamiento local está lleno, continuar sin interrumpir
+    }
+  }, [
+    estadoBd,
+    catalogos,
+    equipos,
+    mantenimientos,
+    calibraciones,
+    prestamos,
+    roles,
+    usuarios,
+  ]);
 
   const abrirCatalogosConConfig = (config = null) => {
     setCatalogosInitialConfig(config);
     setCatalogosModalOpen(true);
   };
 
-  // Refresca las listas de datos directamente desde la base de datos real en el servidor
-  const refrescarDatos = async () => {
+  // Carga inteligente por sección: solo consulta al servidor los datos de la vista actual
+  const refrescarDatos = async (seccionForzada = null) => {
+    const seccion = seccionForzada || activeTab;
     try {
-      const [cats, eqs, mants, cals, prests, rls, usrs] = await Promise.all([
-        api.obtenerCatalogos(),
-        api.listarEquipos(),
-        api.listarMantenimientos(),
-        api.listarCalibraciones(),
-        api.listarPrestamos(),
-        api.listarRoles(),
-        api.listarUsuarios(),
-      ]);
+      // Si está en modo Estudiante, solo necesita Equipos y Catálogos
+      if (!usuarioActual) {
+        const [cats, eqs] = await Promise.all([
+          api.obtenerCatalogos(),
+          api.listarEquipos(),
+        ]);
+        if (cats) setCatalogos(cats);
+        if (eqs) setEquipos(eqs);
+        return;
+      }
 
-      setCatalogos(cats || {});
-      setEquipos(eqs || []);
-      setMantenimientos(mants || []);
-      setCalibraciones(cals || []);
-      setPrestamos(prests || []);
-      setRoles(rls || []);
-      setUsuarios(usrs || []);
+      if (seccion === 'Inventario' || seccion === 'Registro de equipo') {
+        const [cats, eqs] = await Promise.all([
+          api.obtenerCatalogos(),
+          api.listarEquipos(),
+        ]);
+        if (cats) setCatalogos(cats);
+        if (eqs) setEquipos(eqs);
+
+        // En segundo plano (sin bloquear la vista de inventario), sincroniza historial para la Hoja de Vida
+        if (seccion === 'Inventario') {
+          Promise.all([api.listarMantenimientos(), api.listarCalibraciones()])
+            .then(([mants, cals]) => {
+              if (mants) setMantenimientos(mants);
+              if (cals) setCalibraciones(cals);
+            })
+            .catch(() => {});
+        }
+      } else if (seccion === 'Registro de mantenimiento') {
+        const promesas = [api.listarMantenimientos(), api.obtenerCatalogos()];
+        if (equipos.length === 0) promesas.push(api.listarEquipos());
+        const [mants, cats, eqs] = await Promise.all(promesas);
+        if (mants) setMantenimientos(mants);
+        if (cats) setCatalogos(cats);
+        if (eqs) setEquipos(eqs);
+      } else if (seccion === 'Registro de calibración') {
+        const promesas = [api.listarCalibraciones()];
+        if (equipos.length === 0) promesas.push(api.listarEquipos());
+        const [cals, eqs] = await Promise.all(promesas);
+        if (cals) setCalibraciones(cals);
+        if (eqs) setEquipos(eqs);
+      } else if (seccion === 'Préstamos') {
+        const promesas = [api.listarPrestamos(), api.listarEquipos()];
+        const [prests, eqs] = await Promise.all(promesas);
+        if (prests) setPrestamos(prests);
+        if (eqs) setEquipos(eqs);
+      } else if (seccion === 'Usuarios y Roles') {
+        const [rls, usrs] = await Promise.all([
+          api.listarRoles(),
+          api.listarUsuarios(),
+        ]);
+        if (rls) setRoles(rls);
+        if (usrs) setUsuarios(usrs);
+      }
     } catch (err) {
-      console.error('Error al consultar la base de datos:', err);
+      console.error('Error al sincronizar sección con la base de datos:', err);
     }
   };
 
-  // Verifica el estado del servidor FastAPI/MySQL y carga datos reales
+  // Verifica el estado del servidor FastAPI/MySQL en segundo plano
   const verificarEstadoServidor = async (forzar = false) => {
-    const estado = await api.obtenerEstado(forzar);
-    setEstadoBd(estado);
+    api
+      .obtenerEstado(forzar)
+      .then((estado) => setEstadoBd(estado))
+      .catch(() => {});
     await refrescarDatos();
   };
 
+  // Al cambiar de pestaña o iniciar/cerrar sesión, sincroniza solo los datos de esa sección
   useEffect(() => {
-    verificarEstadoServidor();
+    refrescarDatos(activeTab);
+  }, [activeTab, Boolean(usuarioActual)]);
+
+  useEffect(() => {
+    api
+      .obtenerEstado(false)
+      .then((estado) => setEstadoBd(estado))
+      .catch(() => {});
   }, []);
 
   const handleCerrarSesionIrAEstudiante = () => {
@@ -445,27 +571,6 @@ export default function App() {
             </nav>
           </div>
         </div>
-
-        {/* Tarjeta inferior de guía */}
-        <div className="p-5">
-          <div className="p-4 rounded-2xl bg-[#F6FAF7] border border-emerald-100 space-y-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#E3F2E8] text-[#1B5E43] flex items-center justify-center">
-              <LifeBuoy size={17} />
-            </div>
-            <div>
-              <p className="text-xs font-bold text-[#14281D]">¿Necesitas ayuda?</p>
-              <p className="text-[11px] text-[#6B8576] mt-0.5 leading-relaxed">
-                Consulta las carpetas de archivos, escudo institucional y conexión SQL.
-              </p>
-            </div>
-            <button
-              onClick={() => setInfoModalOpen(true)}
-              className="text-xs font-bold text-[#1B5E43] hover:underline inline-flex items-center gap-1"
-            >
-              Ver estado y carpetas <ArrowUpRight size={13} />
-            </button>
-          </div>
-        </div>
       </aside>
 
       {/* CONTENIDO PRINCIPAL */}
@@ -504,15 +609,6 @@ export default function App() {
               <Calendar size={15} className="text-[#6B8576]" />
               <span>{fechaActualTexto}</span>
             </div>
-
-            <button
-              onClick={() => abrirCatalogosConConfig(null)}
-              title="Categorías del sistema"
-              className="w-9 h-9 rounded-xl border border-emerald-100 bg-white hover:bg-emerald-50 flex items-center justify-center text-[#314B3C] relative"
-            >
-              <Bell size={16} />
-              <span className="w-1.5 h-1.5 rounded-full bg-[#1B5E43] absolute top-2 right-2.5" />
-            </button>
 
             {/* Menú desplegable de Perfil */}
             <div className="relative" ref={profileMenuRef}>
@@ -640,7 +736,14 @@ export default function App() {
         }}
         catalogos={catalogos}
         esquemaListo={Boolean(estadoBd.esquema_listo)}
-        onRefresh={() => refrescarDatos()}
+        onRefresh={async () => {
+          const [cats, eqs] = await Promise.all([
+            api.obtenerCatalogos(),
+            api.listarEquipos(),
+          ]);
+          if (cats) setCatalogos(cats);
+          if (eqs) setEquipos(eqs);
+        }}
         initialConfig={catalogosInitialConfig}
       />
 
