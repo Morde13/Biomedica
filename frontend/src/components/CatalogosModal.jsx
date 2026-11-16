@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Building2, Truck, Layers, Check } from 'lucide-react';
+import { X, Plus, Building2, Truck, Layers, Check, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 
 const CATALOGOS_SIMPLES = [
@@ -122,6 +122,50 @@ export default function CatalogosModal({
       initialConfig.onCreated(creado.id);
     }
     notify('Opción agregada correctamente');
+  };
+
+  const handleEliminarSede = async (sede) => {
+    if (!window.confirm(`¿Eliminar la sede "${sede.nombre_sede}"?`)) return;
+    try {
+      await api.eliminarSede(sede.id_sede);
+      await onRefresh();
+      notify('Sede eliminada correctamente');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleEliminarLab = async (lab) => {
+    if (!window.confirm(`¿Eliminar el laboratorio "${lab.nombre_laboratorio}"?`)) return;
+    try {
+      await api.eliminarLaboratorio(lab.id_laboratorio);
+      await onRefresh();
+      notify('Laboratorio eliminado correctamente');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleEliminarProveedor = async (prov) => {
+    if (!window.confirm(`¿Eliminar el proveedor "${prov.nombre_proveedor}"?`)) return;
+    try {
+      await api.eliminarProveedor(prov.id_proveedor);
+      await onRefresh();
+      notify('Proveedor eliminado correctamente');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleEliminarSimple = async (item) => {
+    if (!window.confirm(`¿Eliminar "${item.descripcion}" de ${catalogoActualLabel}?`)) return;
+    try {
+      await api.eliminarItemCatalogo(catKey, item.id);
+      await onRefresh();
+      notify('Opción eliminada correctamente');
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const catalogoActualLabel =
@@ -353,9 +397,17 @@ export default function CatalogosModal({
                   {(catalogos.sedes || []).map((s) => (
                     <div
                       key={s.id_sede}
-                      className="px-3 py-2 text-xs font-medium bg-white border border-emerald-100 rounded-lg text-[#14281D]"
+                      className="px-3 py-2 text-xs font-medium bg-white border border-emerald-100 rounded-lg text-[#14281D] flex items-center justify-between gap-2"
                     >
-                      {s.nombre_sede}
+                      <span className="truncate">{s.nombre_sede}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleEliminarSede(s)}
+                        title="Eliminar sede"
+                        className="p-1.5 rounded-lg text-[#526B5C] hover:text-[#14281D] hover:bg-emerald-50 transition-colors shrink-0"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -398,12 +450,24 @@ export default function CatalogosModal({
                   {(catalogos.laboratorios || []).map((l) => (
                     <div
                       key={l.id_laboratorio}
-                      className="px-3 py-2 text-xs bg-white border border-emerald-100 rounded-lg flex justify-between items-center"
+                      className="px-3 py-2 text-xs bg-white border border-emerald-100 rounded-lg flex justify-between items-center gap-2"
                     >
-                      <span className="font-semibold text-[#14281D]">{l.nombre_laboratorio}</span>
-                      <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                        {l.nombre_sede || 'Sin sede'}
+                      <span className="font-semibold text-[#14281D] truncate">
+                        {l.nombre_laboratorio}
                       </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                          {l.nombre_sede || 'Sin sede'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleEliminarLab(l)}
+                          title="Eliminar laboratorio"
+                          className="p-1.5 rounded-lg text-[#526B5C] hover:text-[#14281D] hover:bg-emerald-50 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -503,7 +567,7 @@ export default function CatalogosModal({
                 {(catalogos.proveedores || []).map((p) => (
                   <div
                     key={p.id_proveedor}
-                    className="px-4 py-2.5 bg-white border border-emerald-100 rounded-xl flex flex-wrap justify-between items-center text-xs"
+                    className="px-4 py-2.5 bg-white border border-emerald-100 rounded-xl flex flex-wrap justify-between items-center text-xs gap-2"
                   >
                     <div>
                       <p className="font-bold text-[#14281D]">{p.nombre_proveedor}</p>
@@ -511,9 +575,21 @@ export default function CatalogosModal({
                         NIT: {p.nit || 'N/A'} · {p.correo_electronico || 'Sin correo'}
                       </p>
                     </div>
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 font-medium">
-                      {p.pais_origen || 'Local'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 font-medium">
+                        {p.pais_origen || 'Local'}
+                      </span>
+                      {!modoIndividual && (
+                        <button
+                          type="button"
+                          onClick={() => handleEliminarProveedor(p)}
+                          title="Eliminar proveedor"
+                          className="p-1.5 rounded-lg text-[#526B5C] hover:text-[#14281D] hover:bg-emerald-50 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -560,9 +636,17 @@ export default function CatalogosModal({
                 {(catalogos[catKey] || []).map((item) => (
                   <div
                     key={item.id}
-                    className="px-3.5 py-2 bg-[#FAFDFB] border border-emerald-100 rounded-xl text-xs font-medium text-[#14281D] flex items-center justify-between"
+                    className="px-3.5 py-2 bg-[#FAFDFB] border border-emerald-100 rounded-xl text-xs font-medium text-[#14281D] flex items-center justify-between gap-2"
                   >
-                    <span>{item.descripcion}</span>
+                    <span className="truncate">{item.descripcion}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleEliminarSimple(item)}
+                      title={`Eliminar ${item.descripcion}`}
+                      className="p-1.5 rounded-lg text-[#526B5C] hover:text-[#14281D] hover:bg-emerald-50 transition-colors shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 ))}
               </div>

@@ -13,6 +13,7 @@ import { Search, ChevronDown, Check, X, QrCode } from 'lucide-react';
 export default function EquipoSearchSelect({
   equipos = [],
   multiple = false,
+  disableLoaned = false,
   value = '', // id único cuando multiple=false
   values = [], // array de ids cuando multiple=true
   onChange,
@@ -35,16 +36,26 @@ export default function EquipoSearchSelect({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const equiposFiltrados = useMemo(() => {
+  const { equiposFiltrados, coincidenciasPrestadas } = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    if (!q) return equipos;
-    return equipos.filter((eq) => {
+    const coincideTexto = (eq) => {
+      if (!q) return true;
       const texto = `${eq.nombre_equipo || ''} ${eq.serie_universidad || ''} ${
         eq.serie_laboratorio || ''
       } ${eq.serie_equipo || ''} ${eq.fabricante || ''} ${eq.modelo || ''}`.toLowerCase();
       return texto.includes(q);
-    });
-  }, [equipos, busqueda]);
+    };
+
+    const coincidencias = equipos.filter(coincideTexto);
+    if (!disableLoaned) {
+      return { equiposFiltrados: coincidencias, coincidenciasPrestadas: [] };
+    }
+
+    return {
+      equiposFiltrados: coincidencias.filter((eq) => !eq.en_prestamo),
+      coincidenciasPrestadas: q ? coincidencias.filter((eq) => eq.en_prestamo) : [],
+    };
+  }, [equipos, busqueda, disableLoaned]);
 
   const equipoSeleccionadoUnico = useMemo(() => {
     if (multiple || !value) return null;
@@ -68,6 +79,9 @@ export default function EquipoSearchSelect({
   }, [abierto, busqueda, multiple, equipoSeleccionadoUnico]);
 
   const handleToggleItem = (eq) => {
+    if (disableLoaned && eq.en_prestamo) {
+      return;
+    }
     if (!multiple) {
       onChange(String(eq.id_equipo), eq);
       setAbierto(false);
@@ -199,14 +213,20 @@ export default function EquipoSearchSelect({
               const seleccionado = multiple
                 ? (values || []).map(String).includes(String(eq.id_equipo))
                 : String(value) === String(eq.id_equipo);
+              const bloqueadoPorPrestamo = Boolean(disableLoaned && eq.en_prestamo);
 
               return (
                 <button
                   key={eq.id_equipo}
                   type="button"
+                  disabled={bloqueadoPorPrestamo}
                   onClick={() => handleToggleItem(eq)}
                   className={`w-full text-left px-4 py-2.5 text-xs transition-colors flex items-center justify-between gap-3 ${
-                    seleccionado ? 'bg-[#E7F5ED]' : 'hover:bg-[#F6FAF7]'
+                    bloqueadoPorPrestamo
+                      ? 'bg-[#F6F9F7] opacity-60 cursor-not-allowed'
+                      : seleccionado
+                      ? 'bg-[#E7F5ED]'
+                      : 'hover:bg-[#F6FAF7]'
                   }`}
                 >
                   <div className="min-w-0">
@@ -214,7 +234,7 @@ export default function EquipoSearchSelect({
                       {eq.nombre_equipo}{' '}
                       {eq.en_prestamo && (
                         <span className="ml-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white border border-[#1B5E43] text-[#1B5E43]">
-                          Prestado
+                          {disableLoaned ? 'En préstamo (No disponible)' : 'Prestado'}
                         </span>
                       )}
                     </p>
@@ -225,7 +245,7 @@ export default function EquipoSearchSelect({
                     </p>
                   </div>
 
-                  {seleccionado && (
+                  {seleccionado && !bloqueadoPorPrestamo && (
                     <div className="w-5 h-5 rounded-full bg-[#1B5E43] text-white flex items-center justify-center shrink-0">
                       <Check size={12} />
                     </div>
@@ -236,7 +256,21 @@ export default function EquipoSearchSelect({
 
             {equiposFiltrados.length === 0 && (
               <div className="p-4 text-center text-xs text-[#6B8576]">
-                No se encontraron equipos con ese nombre o número de serie.
+                {coincidenciasPrestadas.length > 0 ? (
+                  <span>
+                    El equipo buscado (
+                    <strong className="text-[#14281D]">
+                      {coincidenciasPrestadas.map((e) => e.nombre_equipo).join(', ')}
+                    </strong>
+                    ) ya se encuentra en préstamo activo.
+                  </span>
+                ) : disableLoaned &&
+                  equipos.length > 0 &&
+                  equipos.every((e) => e.en_prestamo) ? (
+                  'Todos los equipos registrados se encuentran actualmente en préstamo activo.'
+                ) : (
+                  'No se encontraron equipos disponibles con ese nombre o número de serie.'
+                )}
               </div>
             )}
           </div>

@@ -14,6 +14,7 @@ import {
   Layers,
   Wrench,
   Activity,
+  Link2,
 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -35,6 +36,7 @@ export default function EquipoDetalleModal({
 
   const [fotoActivaIdx, setFotoActivaIdx] = useState(0);
   const [tipoDocId, setTipoDocId] = useState('');
+  const [linkDocUrl, setLinkDocUrl] = useState('');
   const [subiendoDoc, setSubiendoDoc] = useState(false);
   const [descImg, setDescImg] = useState('');
   const [subiendoImg, setSubiendoImg] = useState(false);
@@ -236,20 +238,52 @@ export default function EquipoDetalleModal({
     }
   };
 
-  const handleSubirDatasheet = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleAgregarLinkEquipo = async () => {
+    const raw = linkDocUrl.trim();
+    if (!raw) return;
+    const urlFinal = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     setSubiendoDoc(true);
     try {
-      const res = await api.subirArchivo('datasheets', file);
       await api.agregarDocumentoEquipo(
         equipo.id_equipo,
         {
           id_tipo_doc: tipoDocId ? Number(tipoDocId) : null,
-          ruta_archivo_pdf: res.ruta,
+          ruta_archivo_pdf: urlFinal,
         },
         esquemaListo
       );
+      setLinkDocUrl('');
+      await onRefresh();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSubiendoDoc(false);
+    }
+  };
+
+  const handleSubirDatasheet = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setSubiendoDoc(true);
+    try {
+      const td = (catalogos.tipos_documentos || []).find(
+        (t) => Number(t.id) === Number(tipoDocId)
+      );
+      const tipoNombre = td ? td.descripcion : 'Documento Tecnico';
+      for (const file of files) {
+        const res = await api.subirArchivo('datasheets', file, {
+          tipo_documento: tipoNombre,
+          nombre_equipo: equipo.nombre_equipo || 'Equipo',
+        });
+        await api.agregarDocumentoEquipo(
+          equipo.id_equipo,
+          {
+            id_tipo_doc: tipoDocId ? Number(tipoDocId) : null,
+            ruta_archivo_pdf: res.ruta,
+          },
+          esquemaListo
+        );
+      }
       await onRefresh();
     } catch (err) {
       alert(err.message);
@@ -266,19 +300,24 @@ export default function EquipoDetalleModal({
   };
 
   const handleSubirImagen = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setSubiendoImg(true);
     try {
-      const res = await api.subirArchivo('imagenes', file);
-      await api.agregarImagenEquipo(
-        equipo.id_equipo,
-        {
-          descripcion_imagen: descImg || file.name,
-          ruta_imagen: res.ruta,
-        },
-        esquemaListo
-      );
+      for (const file of files) {
+        const res = await api.subirArchivo('imagenes', file, {
+          tipo_documento: descImg || 'Fotografia',
+          nombre_equipo: equipo.nombre_equipo || 'Equipo',
+        });
+        await api.agregarImagenEquipo(
+          equipo.id_equipo,
+          {
+            descripcion_imagen: descImg || res.nombre_archivo || file.name,
+            ruta_imagen: res.ruta,
+          },
+          esquemaListo
+        );
+      }
       setDescImg('');
       await onRefresh();
     } catch (err) {
@@ -628,7 +667,11 @@ export default function EquipoDetalleModal({
                       className={inputClass}
                     >
                       <option value="">-- Seleccionar --</option>
-                      {(catalogos.catalogo_fuente_alimentacion || []).map((x) => (
+                      {(
+                        catalogos.fuentes_alimentacion ||
+                        catalogos.catalogo_fuente_alimentacion ||
+                        []
+                      ).map((x) => (
                         <option key={x.id} value={x.id}>
                           {x.descripcion}
                         </option>
@@ -643,7 +686,7 @@ export default function EquipoDetalleModal({
                       className={inputClass}
                     >
                       <option value="">-- Seleccionar --</option>
-                      {(catalogos.catalogo_tecnologia || []).map((x) => (
+                      {(catalogos.tecnologias || catalogos.catalogo_tecnologia || []).map((x) => (
                         <option key={x.id} value={x.id}>
                           {x.descripcion}
                         </option>
@@ -1025,10 +1068,11 @@ export default function EquipoDetalleModal({
                         />
                         <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-[#1B5E43] text-white text-xs font-semibold hover:bg-[#144732] flex items-center gap-1.5 shrink-0">
                           <Upload size={13} />
-                          {subiendoImg ? 'Subiendo...' : 'Subir Foto'}
+                          {subiendoImg ? 'Subiendo...' : 'Subir Fotos'}
                           <input
                             type="file"
                             accept="image/*"
+                            multiple
                             onChange={handleSubirImagen}
                             className="hidden"
                           />
@@ -1043,35 +1087,62 @@ export default function EquipoDetalleModal({
                   <div className="px-4 py-3 bg-[#F6F9F7] border-b border-emerald-100 flex items-center justify-between">
                     <h4 className="text-sm font-bold text-[#14281D] flex items-center gap-2">
                       <FileText size={16} className="text-[#1B5E43]" />
-                      Manuales y Documentos Técnicos
+                      Manuales, Documentos y Links de Interés
                     </h4>
                   </div>
 
                   <div className="p-4 space-y-4">
                     {!readOnly && (
-                      <div className="flex gap-2 pb-2 border-b border-emerald-100">
-                        <select
-                          value={tipoDocId}
-                          onChange={(e) => setTipoDocId(e.target.value)}
-                          className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-emerald-200 rounded-xl"
-                        >
-                          <option value="">Tipo de manual / documento...</option>
-                          {(catalogos.tipos_documentos || []).map((td) => (
-                            <option key={td.id} value={td.id}>
-                              {td.descripcion}
-                            </option>
-                          ))}
-                        </select>
-                        <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-[#1B5E43] text-white text-xs font-semibold hover:bg-[#144732] flex items-center gap-1.5 shrink-0">
-                          <Upload size={13} />
-                          {subiendoDoc ? 'Subiendo...' : 'Subir PDF'}
+                      <div className="space-y-2 pb-2.5 border-b border-emerald-100">
+                        <div className="flex gap-2">
+                          <select
+                            value={tipoDocId}
+                            onChange={(e) => setTipoDocId(e.target.value)}
+                            className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-emerald-200 rounded-xl"
+                          >
+                            <option value="">Tipo de manual / link...</option>
+                            {(catalogos.tipos_documentos || []).map((td) => (
+                              <option key={td.id} value={td.id}>
+                                {td.descripcion}
+                              </option>
+                            ))}
+                          </select>
+                          <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-[#1B5E43] text-white text-xs font-semibold hover:bg-[#144732] flex items-center gap-1.5 shrink-0">
+                            <Upload size={13} />
+                            {subiendoDoc ? 'Subiendo...' : 'Subir PDF'}
+                            <input
+                              type="file"
+                              accept=".pdf"
+                              onChange={handleSubirDatasheet}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="flex gap-2">
                           <input
-                            type="file"
-                            accept=".pdf"
-                            onChange={handleSubirDatasheet}
-                            className="hidden"
+                            type="text"
+                            value={linkDocUrl}
+                            onChange={(e) => setLinkDocUrl(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAgregarLinkEquipo();
+                              }
+                            }}
+                            placeholder="O pegar link de interés (https://...)"
+                            className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-emerald-200 rounded-xl"
                           />
-                        </label>
+                          <button
+                            type="button"
+                            disabled={subiendoDoc}
+                            onClick={handleAgregarLinkEquipo}
+                            className="px-3 py-1.5 rounded-xl bg-[#EEF6F1] border border-emerald-200 text-[#1B5E43] hover:bg-[#1B5E43] hover:text-white transition-colors text-xs font-semibold flex items-center gap-1.5 shrink-0"
+                          >
+                            <Link2 size={13} />
+                            Agregar Link
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -1087,9 +1158,13 @@ export default function EquipoDetalleModal({
 
                             <div className="space-y-1.5 pl-3">
                               {listaDocs.map((d, idx) => {
-                                const nombreArchivo =
-                                  (d.ruta_archivo_pdf || '').split('/').pop() ||
-                                  `${subtituloTipo} #${idx + 1}`;
+                                const esLinkExterno = /^https?:\/\//i.test(
+                                  d.ruta_archivo_pdf || ''
+                                );
+                                const nombreArchivo = esLinkExterno
+                                  ? d.ruta_archivo_pdf
+                                  : (d.ruta_archivo_pdf || '').split('/').pop() ||
+                                    `${subtituloTipo} #${idx + 1}`;
                                 return (
                                   <div
                                     key={d.id_documento || idx}
@@ -1101,10 +1176,17 @@ export default function EquipoDetalleModal({
                                       rel="noreferrer"
                                       className="font-semibold text-[#14281D] flex items-center gap-2 flex-1 truncate"
                                     >
-                                      <CheckCircle2
-                                        size={14}
-                                        className="text-emerald-700 shrink-0"
-                                      />
+                                      {esLinkExterno ? (
+                                        <Link2
+                                          size={14}
+                                          className="text-emerald-700 shrink-0"
+                                        />
+                                      ) : (
+                                        <CheckCircle2
+                                          size={14}
+                                          className="text-emerald-700 shrink-0"
+                                        />
+                                      )}
                                       <span className="truncate">{nombreArchivo}</span>
                                       <ExternalLink
                                         size={13}

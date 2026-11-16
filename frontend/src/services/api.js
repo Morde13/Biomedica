@@ -1,5 +1,68 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+/**
+ * Convierte cualquier imagen (.jpg, .png, etc.) a formato WebP optimizado
+ * antes de enviarla al servidor para ahorrar espacio y acelerar la carga web.
+ */
+async function convertirImagenAWebP(file, maxDimension = 1400, quality = 0.82) {
+  if (!file || !file.type || !file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let { width, height } = img;
+      if (width > maxDimension || height > maxDimension) {
+        if (width >= height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const baseName = (file.name || 'imagen').replace(/\.[^/.]+$/, '');
+          const webpFile = new File([blob], `${baseName}.webp`, {
+            type: 'image/webp',
+            lastModified: Date.now(),
+          });
+          resolve(webpFile);
+        },
+        'image/webp',
+        quality
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 async function fetchJson(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -34,9 +97,17 @@ export const api = {
     };
   },
 
-  async subirArchivo(categoria, file) {
+  async subirArchivo(categoria, file, meta = {}) {
+    const archivoFinal =
+      categoria === 'imagenes' ? await convertirImagenAWebP(file) : file;
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', archivoFinal);
+    if (meta.tipo_documento) {
+      formData.append('tipo_documento', meta.tipo_documento);
+    }
+    if (meta.nombre_equipo) {
+      formData.append('nombre_equipo', meta.nombre_equipo);
+    }
     const res = await fetch(`${API_BASE}/api/upload/${categoria}`, {
       method: 'POST',
       body: formData,
@@ -46,6 +117,13 @@ export const api = {
       throw new Error(errBody.detail || 'No se pudo subir el archivo al servidor FastAPI');
     }
     return res.json();
+  },
+
+  async eliminarArchivoTemporal(ruta) {
+    if (!ruta) return;
+    return fetchJson(`/api/upload?ruta=${encodeURIComponent(ruta)}`, {
+      method: 'DELETE',
+    });
   },
 
   async obtenerCatalogos() {
@@ -59,11 +137,19 @@ export const api = {
     });
   },
 
+  async eliminarSede(id_sede) {
+    return fetchJson(`/api/sedes/${id_sede}`, { method: 'DELETE' });
+  },
+
   async crearLaboratorio(payload) {
     return fetchJson('/api/laboratorios', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  async eliminarLaboratorio(id_laboratorio) {
+    return fetchJson(`/api/laboratorios/${id_laboratorio}`, { method: 'DELETE' });
   },
 
   async crearProveedor(payload) {
@@ -73,10 +159,20 @@ export const api = {
     });
   },
 
+  async eliminarProveedor(id_proveedor) {
+    return fetchJson(`/api/proveedores/${id_proveedor}`, { method: 'DELETE' });
+  },
+
   async crearItemCatalogo(nombreCatalogo, valor) {
     return fetchJson(`/api/catalogos/${nombreCatalogo}`, {
       method: 'POST',
       body: JSON.stringify({ valor }),
+    });
+  },
+
+  async eliminarItemCatalogo(nombreCatalogo, id_item) {
+    return fetchJson(`/api/catalogos/${nombreCatalogo}/${id_item}`, {
+      method: 'DELETE',
     });
   },
 
